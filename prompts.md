@@ -17,6 +17,7 @@ Puedes añadir adicionalmente la conversación completa como link o archivo adju
 ## 1. Descripción general del producto
 
 **Prompt 1:**
+quiero crear un servicio de copiloto para llamadas de voz entrantes a un call center. la idea es que los agentes vean en tiempo real recomendaciones por texto por parte de una IA que este esuchando su conversacion con el cliente llamante. En esta conversacion puede darle informacion inicial del cliente si logra identificarlo y preugntar a servicio API a un CRM, podria odnetificar la opregunta y buscarla, identificar el setimiento de la converscion, darle tips de atencion, etc.
 
 **Prompt 2:**
 
