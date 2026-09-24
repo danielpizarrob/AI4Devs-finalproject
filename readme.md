@@ -880,13 +880,143 @@ components:
 
 ## 5. Historias de Usuario
 
-> Documenta 3 de las historias de usuario principales utilizadas durante el desarrollo, teniendo en cuenta las buenas prácticas de producto al respecto.
+# Backlog Inicial del MVP: CallSense AI (Fase 1)
 
-**Historia de Usuario 1**
+---
 
-**Historia de Usuario 2**
+## Épica 1: Captura y Transmisión de Audio Estéreo en Tiempo Real
 
-**Historia de Usuario 3**
+### Historia de usuario 1.1: Captura de canales de audio independientes
+
+Como agente de call center, quiero que la extensión capture de forma simultánea el audio de la llamada del cliente y mi propio micrófono sin mezclarlos, para que el sistema procese a cada interlocutor en un canal independiente.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que el agente tiene una llamada en curso en la pestaña del softphone web (Wildix Collaboration),
+**When** se activa la captura de audio mediante la extensión,
+**Then** el sistema captura la voz del cliente a través del audio de la pestaña y la voz del agente a través del micrófono en dos canales estéreo separados.
+* **Given** que la captura de audio de la pestaña está activa,
+**When** el cliente habla durante la llamada,
+**Then** el agente continúa escuchando el audio del cliente en sus auriculares sin interrupciones ni distorsiones audibles.
+* **Given** que la llamada finaliza y se detecta el evento de colgado,
+**When** el softphone cierra el canal de voz,
+**Then** la extensión detiene automáticamente la captura del micrófono y del audio de la pestaña.
+
+---
+
+### Historia de usuario 1.2: Streaming y transcripción continua con separación de hablantes
+
+Como agente de call center, quiero que la conversación se transcriba continuamente y se asigne a cada interlocutor, para que las intervenciones de voz se conviertan en texto en tiempo real.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que los dos canales de audio están siendo capturados,
+**When** se envían los flujos de audio al servicio de procesamiento,
+**Then** la transcripción de voz a texto se genera de forma continua discriminando de forma unívoca si la intervención corresponde al cliente o al agente.
+* **Given** que uno de los interlocutores está hablando,
+**When** hace una pausa de voz (endpointing),
+**Then** el turno conversacional se segmenta y su transcripción final se estabiliza en menos de 500 ms.
+* **Given** que ambos interlocutores hablan simultáneamente,
+**When** se procesa el audio estéreo,
+**Then** el sistema genera los textos transcritos de ambos canales sin cruzar ni sobreescribir los textos de los hablantes.
+
+---
+
+## Épica 2: Identificación Automática del Cliente y Contexto CRM
+
+### Historia de usuario 2.1: Identificación por documento o teléfono (Zero-Click)
+
+Como agente de call center, quiero que el sistema reconozca el identificador del cliente durante la llamada y consulte el CRM sin que deba digitarlo, para acceder inmediatamente a su información sin cambiar de pantalla.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que la llamada ha iniciado y el cliente vocaliza su DNI, RUC o número de teléfono,
+**When** el sistema detecta y extrae la entidad numérica de la transcripción,
+**Then** realiza automáticamente la consulta vía API al CRM con dicho identificador sin requerir intervención manual del agente.
+* **Given** que el CRM devuelve un registro coincidente con el identificador detectado,
+**When** se recibe la respuesta de la API,
+**Then** la interfaz lateral muestra una tarjeta con el nombre del cliente, segmento/antigüedad, últimas compras y tickets abiertos.
+* **Given** que el identificador extraído no existe en el CRM o no devuelve coincidencias,
+**When** la API del CRM responde con un resultado vacío,
+**Then** el sistema presenta un aviso discreto indicando que el cliente no fue identificado y habilita un campo de búsqueda manual.
+
+---
+
+## Épica 3: Recomendaciones Contextuales y Consulta de Conocimiento (RAG)
+
+### Historia de usuario 3.1: Detección automática de consultas y sugerencia de respuestas
+
+Como agente de soporte (asumido), quiero visualizar sugerencias basadas en las políticas y manuales de la empresa cuando el cliente haga una consulta, para entregar la solución adecuada de manera rápida.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que el cliente realiza una pregunta o manifiesta un reclamo sobre un producto o servicio,
+**When** el sistema detecta la intención en la transcripción,
+**Then** realiza una búsqueda en la base de conocimiento y despliega en el panel una tarjeta de recomendación en formato de viñetas cortas (2 a 3 líneas).
+* **Given** que el sistema entrega una recomendación basada en la base de conocimiento,
+**When** la tarjeta se dibuja en la pantalla del agente,
+**Then** muestra la respuesta procesable y cita el título o sección del manual del cual se extrajo la información.
+* **Given** que una tarjeta de recomendación está visible en el panel,
+**When** el agente presiona el botón "Copiar respuesta",
+**Then** el texto de la recomendación se transfiere al portapapeles del puesto de trabajo.
+
+---
+
+### Historia de usuario 3.2: Disparo asistido de consulta mediante botón de acción rápida
+
+Como agente de call center, quiero activar manualmente una búsqueda en la base de conocimiento mediante un atajo o botón, para forzar una recomendación cuando la consulta del cliente sea confusa o ambigua.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que una conversación está en curso y el cliente plantea una consulta compleja,
+**When** el agente presiona la tecla de acceso rápido configurada (tecla Espacio o F2) o el botón en pantalla,
+**Then** el sistema procesa el contexto conversacional inmediato y dispara la búsqueda de la solución en la base de conocimiento.
+* **Given** que el agente activó la búsqueda manual,
+**When** el modelo resuelve la consulta,
+**Then** la tarjeta de respuesta se despliega en el panel lateral marcada visualmente como resultado de solicitud manual (asumido).
+* **Given** que la base de conocimiento no contiene una coincidencia relevante para la consulta forzada,
+**When** culmina la búsqueda,
+**Then** el panel notifica al operador que no se encontró una respuesta exacta en los manuales disponibles.
+
+---
+
+## Épica 4: Guía de Cumplimiento y Calidad
+
+### Historia de usuario 4.1: Checklist dinámico de cumplimiento normativo y calidad
+
+Como supervisor de calidad y compliance (asumido), quiero que el sistema verifique automáticamente los descargos legales y pasos obligatorios durante la llamada, para asegurar que los agentes cumplan con el protocolo establecido.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que una llamada está en curso y se requiere realizar el saludo inicial formal y el aviso de grabación,
+**When** el agente pronuncia la frase reglamentaria en su canal de micrófono,
+**Then** el ítem correspondiente dentro del checklist de compliance se marca como completado automáticamente.
+* **Given** que una llamada requiere la lectura de un descargo legal o cláusula obligatoria antes de finalizar,
+**When** la llamada avanza sin que el agente haya leído dicha cláusula,
+**Then** el ítem del checklist permanece en estado pendiente alertando visualmente al operador.
+* **Given** que la llamada finaliza,
+**When** el sistema compila los datos de la sesión,
+**Then** registra el estado final de cada punto del checklist de cumplimiento (completado o no completado) asociado al registro de la llamada.
+
+---
+
+## Épica 5: Resumen y Cierre Post-Llamada (After Call Work)
+
+### Historia de usuario 5.1: Generación y sincronización automática del resumen post-llamada
+
+Como agente de call center, quiero que el sistema redacte un resumen estructurado y la tipificación al colgar, para evitar redactar notas manuales y actualizar el CRM con un solo clic.
+
+#### Criterios de aceptación (Given/When/Then):
+
+* **Given** que una llamada ha estado activa con transcripción generada,
+**When** se detecta el evento de término de llamada (hangup),
+**Then** el sistema presenta en el panel un borrador de resumen estructurado que incluye motivo de contacto, problema, solución acordada y siguiente acción.
+* **Given** que el resumen estructurado ha sido generado,
+**When** el agente revisa el texto,
+**Then** puede editar directamente el contenido de los campos de notas y tipificación antes de enviarlo.
+* **Given** que el agente valida el resumen y la tipificación sugerida,
+**When** hace clic en el botón de confirmación de guardado,
+**Then** el sistema envía la información vía API al CRM, actualiza el ticket correspondiente y notifica en pantalla la confirmación exitosa de sincronización.
 
 ---
 
