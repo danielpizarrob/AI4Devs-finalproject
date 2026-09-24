@@ -603,12 +603,6 @@ Segmentos de texto extraídos del documento maestro e indexados vectorialmente.
 
 ## 4. Especificación de la API
 
-Aquí tienes la especificación formal de los 3 endpoints principales del backend en formato **OpenAPI 3.0.3 (YAML)**, incluyendo esquemas estrictos, ejemplos de solicitud (*request*) y ejemplos de respuesta (*response*) para cada uno.
-
----
-
-# 4. Especificación de la API
-
 ```yaml
 openapi: 3.0.3
 info:
