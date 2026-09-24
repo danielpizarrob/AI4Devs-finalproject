@@ -301,7 +301,6 @@ Aquí tienes una versión refinada, exhaustiva y con máxima precisión técnica
 
 ### 3.1. Diagrama del modelo de datos
 
-```mermaid
 erDiagram
     TENANT ||--o{ AGENT : "emplea"
     TENANT ||--o{ KNOWLEDGE_DOCUMENT : "posee"
@@ -319,32 +318,32 @@ erDiagram
 
     TENANT {
         uuid id PK
-        varchar(100) name "NOT NULL"
-        varchar(50) code UK "NOT NULL"
-        boolean is_active "NOT NULL DEFAULT true"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        string name "NOT NULL"
+        string code "UK, NOT NULL"
+        boolean is_active "NOT NULL, DEFAULT true"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     AGENT {
         uuid id PK
         uuid tenant_id FK "NOT NULL"
-        varchar(150) email UK "NOT NULL"
-        varchar(120) full_name "NOT NULL"
-        varchar(30) pbx_extension "NOT NULL"
-        varchar(20) role "NOT NULL DEFAULT 'agent'"
-        boolean is_active "NOT NULL DEFAULT true"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        string email "UK, NOT NULL"
+        string full_name "NOT NULL"
+        string pbx_extension "NOT NULL"
+        string role "NOT NULL, DEFAULT 'agent'"
+        boolean is_active "NOT NULL, DEFAULT true"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     CUSTOMER {
         uuid id PK
-        varchar(100) crm_contact_id "NULLABLE"
-        varchar(25) phone_number "NOT NULL"
-        varchar(20) document_id "NULLABLE"
-        varchar(120) full_name "NULLABLE"
-        varchar(50) customer_tier "NULLABLE"
-        jsonb metadata "NOT NULL DEFAULT '{}'"
-        timestamp_tz updated_at "NOT NULL DEFAULT now()"
+        string crm_contact_id "NULLABLE"
+        string phone_number "NOT NULL"
+        string document_id "NULLABLE"
+        string full_name "NULLABLE"
+        string customer_tier "NULLABLE"
+        jsonb metadata "NOT NULL, DEFAULT '{}'"
+        datetime updated_at "NOT NULL, DEFAULT now()"
     }
 
     CALL_SESSION {
@@ -352,77 +351,74 @@ erDiagram
         uuid tenant_id FK "NOT NULL"
         uuid agent_id FK "NOT NULL"
         uuid customer_id FK "NULLABLE"
-        varchar(100) wildix_call_id UK "NOT NULL"
-        varchar(20) call_direction "NOT NULL DEFAULT 'inbound'"
-        varchar(20) status "NOT NULL DEFAULT 'in_progress'"
-        timestamp_tz started_at "NOT NULL DEFAULT now()"
-        timestamp_tz ended_at "NULLABLE"
-        integer duration_seconds "NULLABLE"
-        varchar(15) initial_sentiment "NULLABLE"
-        varchar(15) final_sentiment "NULLABLE"
+        string wildix_call_id "UK, NOT NULL"
+        string call_direction "NOT NULL, DEFAULT 'inbound'"
+        string status "NOT NULL, DEFAULT 'in_progress'"
+        datetime started_at "NOT NULL, DEFAULT now()"
+        datetime ended_at "NULLABLE"
+        int duration_seconds "NULLABLE"
+        string initial_sentiment "NULLABLE"
+        string final_sentiment "NULLABLE"
     }
 
     TRANSCRIPT_TURN {
         uuid id PK
         uuid call_session_id FK "NOT NULL"
-        integer sequence_order "NOT NULL"
-        varchar(10) speaker_role "NOT NULL"
-        text content "NOT NULL"
-        decimal start_offset_sec "NOT NULL"
-        decimal end_offset_sec "NOT NULL"
-        decimal confidence_score "NOT NULL"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        int sequence_order "NOT NULL"
+        string speaker_role "NOT NULL"
+        string content "NOT NULL"
+        float start_offset_sec "NOT NULL"
+        float end_offset_sec "NOT NULL"
+        float confidence_score "NOT NULL"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     AI_SUGGESTION {
         uuid id PK
         uuid call_session_id FK "NOT NULL"
         uuid knowledge_chunk_id FK "NULLABLE"
-        varchar(30) suggestion_type "NOT NULL"
-        text suggested_text "NOT NULL"
-        jsonb action_payload "NOT NULL DEFAULT '{}'"
-        decimal triggered_at_sec "NOT NULL"
-        varchar(20) trigger_source "NOT NULL DEFAULT 'auto'"
-        varchar(20) agent_action "NOT NULL DEFAULT 'ignored'"
-        integer latency_ms "NOT NULL"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        string suggestion_type "NOT NULL"
+        string suggested_text "NOT NULL"
+        jsonb action_payload "NOT NULL, DEFAULT '{}'"
+        float triggered_at_sec "NOT NULL"
+        string trigger_source "NOT NULL, DEFAULT 'auto'"
+        string agent_action "NOT NULL, DEFAULT 'ignored'"
+        int latency_ms "NOT NULL"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     CALL_SUMMARY {
         uuid id PK
-        uuid call_session_id FK UK "NOT NULL"
-        text main_reason "NOT NULL"
-        text solution_provided "NOT NULL"
-        text pending_tasks "NULLABLE"
-        varchar(30) disposition_code "NOT NULL"
-        boolean crm_synced "NOT NULL DEFAULT false"
-        timestamp_tz synced_at "NULLABLE"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        uuid call_session_id FK "UK, NOT NULL"
+        string main_reason "NOT NULL"
+        string solution_provided "NOT NULL"
+        string pending_tasks "NULLABLE"
+        string disposition_code "NOT NULL"
+        boolean crm_synced "NOT NULL, DEFAULT false"
+        datetime synced_at "NULLABLE"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     KNOWLEDGE_DOCUMENT {
         uuid id PK
         uuid tenant_id FK "NOT NULL"
-        varchar(200) title "NOT NULL"
-        varchar(50) category "NOT NULL"
-        varchar(255) source_url "NULLABLE"
-        integer version "NOT NULL DEFAULT 1"
-        boolean is_active "NOT NULL DEFAULT true"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        string title "NOT NULL"
+        string category "NOT NULL"
+        string source_url "NULLABLE"
+        int version "NOT NULL, DEFAULT 1"
+        boolean is_active "NOT NULL, DEFAULT true"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
 
     KNOWLEDGE_CHUNK {
         uuid id PK
         uuid knowledge_document_id FK "NOT NULL"
-        integer chunk_index "NOT NULL"
-        text chunk_text "NOT NULL"
-        varchar(100) vector_point_id UK "NOT NULL"
-        jsonb metadata "NOT NULL DEFAULT '{}'"
-        timestamp_tz created_at "NOT NULL DEFAULT now()"
+        int chunk_index "NOT NULL"
+        string chunk_text "NOT NULL"
+        string vector_point_id "UK, NOT NULL"
+        jsonb metadata "NOT NULL, DEFAULT '{}'"
+        datetime created_at "NOT NULL, DEFAULT now()"
     }
-
-```
-
 ---
 
 ### 3.2. Descripción de entidades principales
