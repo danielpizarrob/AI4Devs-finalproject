@@ -300,7 +300,7 @@ Aquí tienes una versión refinada, exhaustiva y con máxima precisión técnica
 # 3. Modelo de Datos
 
 ### 3.1. Diagrama del modelo de datos
-```
+```mermaid
 erDiagram
     TENANT ||--o{ AGENT : "emplea"
     TENANT ||--o{ KNOWLEDGE_DOCUMENT : "posee"
