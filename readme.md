@@ -97,30 +97,198 @@ El sistema se integra como una barra lateral (*side-panel*) no intrusiva sobre l
 
 ## 2. Arquitectura del Sistema
 
-### **2.1. Diagrama de arquitectura:**
-> Usa el formato que consideres más adecuado para representar los componentes principales de la aplicación y las tecnologías utilizadas. Explica si sigue algún patrón predefinido, justifica por qué se ha elegido esta arquitectura, y destaca los beneficios principales que aportan al proyecto y justifican su uso, así como sacrificios o déficits que implica.
+### 2.1. Diagrama de arquitectura
+
+```
+  ┌────────────────────────────────────────────────────────────────────────┐
+  │                 CLIENTE / NAVEGADOR (PUESTO DE AGENTE)                 │
+  │                                                                        │
+  │   ┌───────────────────────────┐         ┌──────────────────────────┐   │
+  │   │  Wildix Collaboration Tab │         │  Side Panel UI (React)   │   │
+  │   │  (WebRTC Audio In/Out)    │         │  - Ficha CRM             │   │
+  │   └─────────────┬─────────────┘         │  - Tarjetas de Sugerencia│   │
+  │                 │                       │  - Alerta Emocional      │   │
+  │                 ▼                       └────────────▲─────────────┘   │
+  │   ┌───────────────────────────┐                      │                 │
+  │   │ Background / Offscreen    │                      │ Push Eventos    │
+  │   │ - tabCapture (Cliente)    │                      │ (UI State)      │
+  │   │ - getUserMedia (Agente)   │                      │                 │
+  │   │ - Web Audio API (Estéreo) │                      │                 │
+  │   └─────────────┬─────────────┘                      │                 │
+  └─────────────────┼────────────────────────────────────┼─────────────────┘
+                    │                                    │
+                    │ PCM Audio Stream (Dual-Channel)    │ WebSocket (JSON)
+                    ▼                                    │
+  ┌──────────────────────────────────────────────────────┴─────────────────┐
+  │                  BACKEND ORCHESTRATOR (NODE.JS / FASTIFY)              │
+  │                                                                        │
+  │  ┌─────────────────────────┐               ┌────────────────────────┐  │
+  │  │ WebSocket Gateway       │               │ Session & State Manager│  │
+  │  │ (Auth, Heartbeat, VAD)  │──────────────►│ (Sliding Context & ID) │  │
+  │  └───────────┬─────────────┘               └───────────┬────────────┘  │
+  │              │ Audio chunks                            │               │
+  │              ▼                                         │ Transcripción │
+  │  ┌─────────────────────────┐                           ▼               │
+  │  │ STT Streaming Client    │               ┌────────────────────────┐  │
+  │  │ (Deepgram Nova-2 /      │──────────────►│ Copilot Engine / LLM   │  │
+  │  │  Whisper Streaming)     │ Transcripción │ (NER, Router, Fast LLM)│  │
+  │  └─────────────────────────┘               └─────┬────────────┬─────┘  │
+  │                                                  │            │        │
+  └──────────────────────────────────────────────────┼────────────┼────────┘
+                                                     │            │
+                           REST API / OAuth2         │            │ Semántico
+                                                     ▼            ▼
+                                             ┌───────────┐ ┌─────────────┐
+                                             │  CRM API  │ │ Vector DB   │
+                                             │ (Tickets, │ │ (Qdrant /   │
+                                             │  Contact) │ │  Chroma /   │
+                                             │           │ │  Manuales)  │
+                                             └───────────┘ └─────────────┘
+
+```
+
+#### Patrón Arquitectónico
+
+* **Arquitectura Orientada a Eventos (EDA) + Pipeline Asíncrono de Streaming**: Basado en eventos de audio y mensajes bidireccionales vía WebSockets.
+* **Stateful Session per Call**: Cada llamada activa instancia una sesión temporal en memoria que mantiene los últimos *N* turnos de conversación (*sliding window*) y los datos de contexto del cliente recuperados del CRM.
+
+#### Justificación de la Elección
+
+1. **Latencia Sub-Segundo:** Los protocolos HTTP convencionales basados en sondeo (*polling*) o llamadas sincrónicas cliente-servidor degradan la experiencia. WebSockets full-duplex permiten recibir audio continuo y retornar tarjetas de sugerencia en menos de 1.2 segundos tras el fin de turno.
+2. **Agnóstico de Telefonía PBX:** Al apoyarse en la captura del navegador (Chrome Extension), no se requiere alterar la infraestructura de PBX/WMS ni exponer puertos SIP/RTP externos.
+
+#### Beneficios Principales
+
+* **Despliegue Cero Fricción en PBX:** Funciona inmediatamente sobre cualquier agente que utilice el cliente web de Wildix.
+* **Separación de Hablantes Perfecta:** Al procesar canales independientes (Canal L = Cliente, Canal R = Agente), la transcripción tiene 100% de precisión de hablante sin sobrecoste de diarización de audio.
+* **Ahorro de Cómputo:** Las consultas pesadas de RAG y análisis de intención solo se disparan tras detección de pausas (*endpointing*) o mediante disparador asistido del operador.
+
+#### Sacrificios y Déficits (Trade-offs)
+
+* **Consumo de Recursos en Cliente:** Procesar dos flujos de audio con Web Audio API en el navegador del operador añade un ligero consumo de CPU/RAM en la máquina local.
+* **Dependencia del Navegador:** Requiere el uso de Google Chrome / Chromium con la extensión corporativa instalada y permisos activos de captura de pestañas y micrófono.
+
+---
+
+### 2.2. Descripción de componentes principales
+
+| Componente | Tecnología | Propósito |
+| --- | --- | --- |
+| **Capture & Frontend Widget** | Manifest V3, Web Audio API, React 18, TailwindCSS | Extensión de Chrome. Captura y multiplexa el audio estéreo (tab + micro), mantiene la conexión WSS y renderiza las tarjetas de sugerencia y sentimiento en el Side Panel. |
+| **Media Gateway & Orchestrator** | Node.js (v20+ LTS) con Fastify y `@fastify/websocket` | Servidor backend asíncrono. Gestiona el ciclo de vida de la conexión WSS, búferes de audio en memoria y la cola de eventos por llamada. |
+| **Speech-to-Text (STT)** | Deepgram Nova-2 API (o Whisper Live streaming) | Transcripción de audio a texto continua con latencia < 350 ms, soporte multi-canal nativo y soporte en español con terminología local. |
+| **Inference Engine (LLM)** | Google Gemini 1.5 Flash / Claude 3.5 Haiku | Modelo liviano y de baja latencia encargado de: 1) Clasificación de sentimiento, 2) Extracción de identificadores (DNI/Teléfono), 3) Generación de respuestas guiadas y 4) Resumen post-llamada. |
+| **Retrieval Augmented Generation (RAG)** | Qdrant / ChromaDB + Text Embeddings | Indexación y búsqueda semántica de manuales operativos, matrices de objeciones y políticas de soporte al cliente. |
+| **CRM Connector** | Cliente HTTP Axios / Fastify Integration Module | Capa de abstracción para consultar endpoints REST del CRM (búsqueda por número/documento y persistencia de tickets y tipificaciones). |
+
+---
+
+### 2.3. Descripción de alto nivel del proyecto y estructura de ficheros
+
+El repositorio se organiza bajo una estructura **Monorepo** modular, separando la lógica del cliente (extensión) del orquestador backend:
+
+```text
+callsense-ai/
+├── apps/
+│   ├── extension/               # Extensión de Chrome (Manifest V3)
+│   │   ├── public/              # Icons y manifest.json
+│   │   ├── src/
+│   │   │   ├── background/      # Service Worker (gestión de pestañas y lifecycle)
+│   │   │   ├── offscreen/       # Audio Capture Worker (tabCapture + getUserMedia + WebAudio)
+│   │   │   ├── sidepanel/       # UI del Agente (React Components, Hooks, State)
+│   │   │   └── shared/          # Interfaces TS y contratos de mensajes
+│   │   └── package.json
+│   │
+│   └── orchestrator/            # Backend Node.js / TypeScript
+│       ├── src/
+│       │   ├── core/            # Gestor de llamadas y sesiones en memoria
+│       │   ├── gateway/         # WebSocket handlers y codecs de audio
+│       │   ├── services/
+│       │   │   ├── stt/         # Cliente de streaming STT (Deepgram/Whisper)
+│       │   │   ├── llm/         # Prompts, parsers y llamadas a LLMs
+│       │   │   ├── rag/         # Vector DB search y reranking
+│       │   │   └── crm/         # Integración REST con CRM
+│       │   ├── config/          # Variables de entorno y configuraciones
+│       │   └── index.ts         # Punto de entrada Fastify
+│       ├── Dockerfile
+│       └── package.json
+│
+├── docs/                        # Diagramas, especificaciones OpenAPI y prompts
+├── docker-compose.yml           # Despliegue local (Orchestrator + Vector DB)
+└── README.md
+
+```
+
+#### Patrón y Justificación
+
+* **Clean Architecture / Hexagonal (en el backend):** La capa `services` desacopla los proveedores externos (cambiar de Deepgram a Whisper, o de un CRM a otro) sin alterar la lógica de negocio del orquestador en `core`.
+* **Offscreen Pattern (en la extensión):** Obligatorio según el estándar Manifest V3 de Chrome para manipular streams de `AudioContext` de manera estable sin que el Service Worker sea suspendido por inactividad.
+
+---
+
+### 2.4. Infraestructura y despliegue
+
+```
+                                      ┌──────────────────────────────────────┐
+                                      │            CLOUD PROVIDER            │
+                                      │                                      │
+[Chrome Extensions]                   │   ┌───────────────┐                  │
+        │                             │   │ Cloudflare /  │                  │
+        │ TLS / WSS                   │   │ Traefik (WAF) │                  │
+        ▼                             │   └───────┬───────┘                  │
+┌───────────────┐                     │           │ WSS Reverse Proxy        │
+│ Load Balancer │─────────────────────┼───────────▼                          │
+└───────────────┘                     │   ┌──────────────────────────────┐   │
+                                      │   │ Orchestrator Containers      │   │
+                                      │   │ (Docker / Google Cloud Run / │   │
+                                      │   │  AWS ECS Fargate)            │   │
+                                      │   └───────┬──────────────┬───────┘   │
+                                      │           │              │           │
+                                      │           ▼              ▼           │
+                                      │     ┌───────────┐  ┌─────────────┐   │
+                                      │     │ Redis     │  │ Qdrant      │   │
+                                      │     │ (Shared   │  │ (Vector DB) │   │
+                                      │     │  Session) │  └─────────────┘   │
+                                      │     └───────────┘                    │
+                                      └──────────────────────────────────────┘
+
+```
+
+#### Proceso de Despliegue (CI/CD)
+
+1. **Integración Continua (GitHub Actions):** En cada `push` o `merge` a la rama `main`, se ejecutan linters, chequeos de tipos de TypeScript y tests unitarios.
+2. **Empaquetado de la Extensión:** Se compila el bundle de la extensión de Chrome (`pnpm run build`), generando un artefacto `.zip` versionado listo para despliegue manual o distribución en la Chrome Web Store interna/privada.
+3. **Contenedorización y Entrega Continua:** El backend se empaqueta en una imagen Docker ligera (Alpine-based Node.js), se escanea con Trivy para detectar vulnerabilidades y se despliega automáticamente en un clúster de contenedores (Cloud Run o ECS Fargate) protegido por terminación TLS.
+
+---
+
+### 2.5. Seguridad
+
+* **Cifrado en Tránsito:** Toda la transmisión de audio y mensajes de señalización se realiza obligatoriamente sobre **WSS (WebSocket Secure)** y llamadas HTTPS cifradas con TLS 1.3.
+* **Aislamiento de Permisos en el Navegador:** La extensión opera bajo el principio de mínimo privilegio en su `manifest.json`, solicitando acceso de captura de audio únicamente sobre el origen específico de la pestaña del softphone (Wildix Collaboration) y no sobre la navegación global del usuario.
+* **Anonimización y Enmascaramiento de PII:** Implementación de un filtro por expresiones regulares y NER previo a la invocación de LLMs públicos para enmascarar datos de alta sensibilidad como códigos CVV/CVC, claves y números de tarjetas bancarias.
+* **Autenticación Basada en Tokens:** El canal WebSocket requiere un JWT (JSON Web Token) de sesión emitido para el agente autenticado, impidiendo accesos no autorizados a las sesiones de llamada y transcripción.
+* **Política de Retención de Audio:** El audio procesado en streaming no se almacena en disco en el servidor intermedio; los fragmentos (*chunks*) residen exclusivamente en memoria volátil durante el tiempo de inferencia del STT y son desechados de inmediato.
+
+---
+
+### 2.6. Tests
+
+* **Tests Unitarios (Backend):** Implementados con **Vitest / Jest** sobre los módulos de procesamiento de texto:
+* Pruebas de extracción de entidades (validación de expresiones regulares de DNI, teléfono y código de cliente).
+* Pruebas de lógica de ventana deslizante (*sliding window*) de turnos conversacionales.
 
 
-### **2.2. Descripción de componentes principales:**
+* **Tests de Integración de Audio y WebSocket:**
+* Simulación de clientes WebSocket enviando streams de audio PCM sintético pregrabado para verificar que el pipeline procese los mensajes, invoque el mock del STT y retorne el payload JSON esperado en menos de 1 segundo.
 
-> Describe los componentes más importantes, incluyendo la tecnología utilizada
 
-### **2.3. Descripción de alto nivel del proyecto y estructura de ficheros**
+* **Tests de Integración con el CRM:**
+* Mocks con `msw` (Mock Service Worker) para validar el comportamiento del orquestador ante respuestas exitosas, retrasos de red o errores HTTP 404/500 en las APIs del CRM.
 
-> Representa la estructura del proyecto y explica brevemente el propósito de las carpetas principales, así como si obedece a algún patrón o arquitectura específica.
 
-### **2.4. Infraestructura y despliegue**
-
-> Detalla la infraestructura del proyecto, incluyendo un diagrama en el formato que creas conveniente, y explica el proceso de despliegue que se sigue
-
-### **2.5. Seguridad**
-
-> Enumera y describe las prácticas de seguridad principales que se han implementado en el proyecto, añadiendo ejemplos si procede
-
-### **2.6. Tests**
-
-> Describe brevemente algunos de los tests realizados
-
+* **Tests de Carga y Concurrencia:**
+* Pruebas ejecutadas con herramientas de benchmark de WebSockets (ej. `k6` / `Artillery`) para garantizar la estabilidad del servidor ante 50+ conexiones de audio en streaming simultáneas sin fugas de memoria.
 ---
 
 ## 3. Modelo de Datos
