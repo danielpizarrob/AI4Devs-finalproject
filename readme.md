@@ -293,15 +293,316 @@ callsense-ai/
 
 ## 3. Modelo de Datos
 
-### **3.1. Diagrama del modelo de datos:**
+Aquí tienes una versión refinada, exhaustiva y con máxima precisión técnica para la **Sección 3: Modelo de Datos**, modelada para una base de datos relacional robusta (como PostgreSQL) que respalda tanto la analítica en caliente como la auditoría post-llamada, control de calidad (QA) y retroalimentación de IA.
 
-> Recomendamos usar mermaid para el modelo de datos, y utilizar todos los parámetros que permite la sintaxis para dar el máximo detalle, por ejemplo las claves primarias y foráneas.
+---
+
+# 3. Modelo de Datos
+
+### 3.1. Diagrama del modelo de datos
+
+```mermaid
+erDiagram
+    TENANT ||--o{ AGENT : "emplea"
+    TENANT ||--o{ KNOWLEDGE_DOCUMENT : "posee"
+    TENANT ||--o{ CALL_SESSION : "registra"
+
+    AGENT ||--o{ CALL_SESSION : "atiende"
+    CUSTOMER ||--o{ CALL_SESSION : "participa"
+
+    CALL_SESSION ||--o{ TRANSCRIPT_TURN : "contiene"
+    CALL_SESSION ||--o{ AI_SUGGESTION : "recibe"
+    CALL_SESSION ||--o| CALL_SUMMARY : "produce"
+
+    KNOWLEDGE_DOCUMENT ||--o{ KNOWLEDGE_CHUNK : "secciona"
+    KNOWLEDGE_CHUNK |o--o{ AI_SUGGESTION : "sustenta"
+
+    TENANT {
+        uuid id PK
+        varchar(100) name "NOT NULL"
+        varchar(50) code UK "NOT NULL"
+        boolean is_active "NOT NULL DEFAULT true"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    AGENT {
+        uuid id PK
+        uuid tenant_id FK "NOT NULL"
+        varchar(150) email UK "NOT NULL"
+        varchar(120) full_name "NOT NULL"
+        varchar(30) pbx_extension "NOT NULL"
+        varchar(20) role "NOT NULL DEFAULT 'agent'"
+        boolean is_active "NOT NULL DEFAULT true"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    CUSTOMER {
+        uuid id PK
+        varchar(100) crm_contact_id "NULLABLE"
+        varchar(25) phone_number "NOT NULL"
+        varchar(20) document_id "NULLABLE"
+        varchar(120) full_name "NULLABLE"
+        varchar(50) customer_tier "NULLABLE"
+        jsonb metadata "NOT NULL DEFAULT '{}'"
+        timestamp_tz updated_at "NOT NULL DEFAULT now()"
+    }
+
+    CALL_SESSION {
+        uuid id PK
+        uuid tenant_id FK "NOT NULL"
+        uuid agent_id FK "NOT NULL"
+        uuid customer_id FK "NULLABLE"
+        varchar(100) wildix_call_id UK "NOT NULL"
+        varchar(20) call_direction "NOT NULL DEFAULT 'inbound'"
+        varchar(20) status "NOT NULL DEFAULT 'in_progress'"
+        timestamp_tz started_at "NOT NULL DEFAULT now()"
+        timestamp_tz ended_at "NULLABLE"
+        integer duration_seconds "NULLABLE"
+        varchar(15) initial_sentiment "NULLABLE"
+        varchar(15) final_sentiment "NULLABLE"
+    }
+
+    TRANSCRIPT_TURN {
+        uuid id PK
+        uuid call_session_id FK "NOT NULL"
+        integer sequence_order "NOT NULL"
+        varchar(10) speaker_role "NOT NULL"
+        text content "NOT NULL"
+        decimal start_offset_sec "NOT NULL"
+        decimal end_offset_sec "NOT NULL"
+        decimal confidence_score "NOT NULL"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    AI_SUGGESTION {
+        uuid id PK
+        uuid call_session_id FK "NOT NULL"
+        uuid knowledge_chunk_id FK "NULLABLE"
+        varchar(30) suggestion_type "NOT NULL"
+        text suggested_text "NOT NULL"
+        jsonb action_payload "NOT NULL DEFAULT '{}'"
+        decimal triggered_at_sec "NOT NULL"
+        varchar(20) trigger_source "NOT NULL DEFAULT 'auto'"
+        varchar(20) agent_action "NOT NULL DEFAULT 'ignored'"
+        integer latency_ms "NOT NULL"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    CALL_SUMMARY {
+        uuid id PK
+        uuid call_session_id FK UK "NOT NULL"
+        text main_reason "NOT NULL"
+        text solution_provided "NOT NULL"
+        text pending_tasks "NULLABLE"
+        varchar(30) disposition_code "NOT NULL"
+        boolean crm_synced "NOT NULL DEFAULT false"
+        timestamp_tz synced_at "NULLABLE"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    KNOWLEDGE_DOCUMENT {
+        uuid id PK
+        uuid tenant_id FK "NOT NULL"
+        varchar(200) title "NOT NULL"
+        varchar(50) category "NOT NULL"
+        varchar(255) source_url "NULLABLE"
+        integer version "NOT NULL DEFAULT 1"
+        boolean is_active "NOT NULL DEFAULT true"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+    KNOWLEDGE_CHUNK {
+        uuid id PK
+        uuid knowledge_document_id FK "NOT NULL"
+        integer chunk_index "NOT NULL"
+        text chunk_text "NOT NULL"
+        varchar(100) vector_point_id UK "NOT NULL"
+        jsonb metadata "NOT NULL DEFAULT '{}'"
+        timestamp_tz created_at "NOT NULL DEFAULT now()"
+    }
+
+```
+
+---
+
+### 3.2. Descripción de entidades principales
+
+#### 1. Entidad: `TENANT` (Organización / Empresa)
+
+Permite aislar datos en caso de uso multi-cliente o diferentes sedes operativas de un mismo call center.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único global del tenant.
+* `name` (`VARCHAR(100)`, NOT NULL): Razón social o nombre descriptivo.
+* `code` (`VARCHAR(50)`, NOT NULL, UNIQUE): Slug identificador alfanumérico.
+* `is_active` (`BOOLEAN`, NOT NULL, DEFAULT `true`): Estado de suscripción/operatividad.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`): Fecha y hora de alta.
 
 
-### **3.2. Descripción de entidades principales:**
+* **Relaciones:** 1:N con `AGENT`, `KNOWLEDGE_DOCUMENT` y `CALL_SESSION`.
 
-> Recuerda incluir el máximo detalle de cada entidad, como el nombre y tipo de cada atributo, descripción breve si procede, claves primarias y foráneas, relaciones y tipo de relación, restricciones (unique, not null…), etc.
+---
 
+#### 2. Entidad: `AGENT` (Agente de Call Center)
+
+Operador humano que interactúa con la extensión de navegador en Wildix.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único del agente.
+* `tenant_id` (`UUID`, FK, NOT NULL): Referencia a `TENANT(id)`.
+* `email` (`VARCHAR(150)`, NOT NULL, UNIQUE): Correo corporativo del operador.
+* `full_name` (`VARCHAR(120)`, NOT NULL): Nombre y apellido del agente.
+* `pbx_extension` (`VARCHAR(30)`, NOT NULL): Número de anexo o extensión en Wildix PBX (ej. "4010").
+* `role` (`VARCHAR(20)`, NOT NULL, DEFAULT `'agent'`): Nivel de rol (`'agent'`, `'supervisor'`, `'admin'`).
+* `is_active` (`BOOLEAN`, NOT NULL, DEFAULT `true`): Permiso de acceso activo al sistema.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+* **Relaciones:** 1:N con `CALL_SESSION`.
+
+---
+
+#### 3. Entidad: `CUSTOMER` (Cliente / Llamante)
+
+Registro del cliente consultado o enriquecido mediante el CRM a través de la llamada.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador interno del cliente.
+* `crm_contact_id` (`VARCHAR(100)`, NULLABLE): ID foráneo en el CRM del cliente (HubSpot, Salesforce, etc.).
+* `phone_number` (`VARCHAR(25)`, NOT NULL): Número telefónico normalizado en formato E.164.
+* `document_id` (`VARCHAR(20)`, NULLABLE): DNI, RUC, o documento de identidad extraído de la llamada.
+* `full_name` (`VARCHAR(120)`, NULLABLE): Nombre recuperado del CRM o inferido por la IA.
+* `customer_tier` (`VARCHAR(50)`, NULLABLE): Clasificación del cliente (ej. `'Standard'`, `'VIP'`, `'Riesgo de Fuga'`).
+* `metadata` (`JSONB`, NOT NULL, DEFAULT `'{}'`): Objeto flexible que contiene datos dinámicos devueltos por el CRM (últimos tickets, saldos, productos contratados).
+* `updated_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+* **Relaciones:** 1:N con `CALL_SESSION`.
+
+---
+
+#### 4. Entidad: `CALL_SESSION` (Sesión de Llamada)
+
+Entidad medular que conecta la llamada de telefonía en Wildix con el ciclo de vida del copiloto.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único de la sesión del copiloto.
+* `tenant_id` (`UUID`, FK, NOT NULL): Referencia a `TENANT(id)`.
+* `agent_id` (`UUID`, FK, NOT NULL): Referencia al operador en `AGENT(id)`.
+* `customer_id` (`UUID`, FK, NULLABLE): Referencia a `CUSTOMER(id)` (puede ser nulo si no se logra asociar cliente).
+* `wildix_call_id` (`VARCHAR(100)`, NOT NULL, UNIQUE): Identificador nativo SIP/WebRTC (`Call-ID`) de Wildix para reconciliación.
+* `call_direction` (`VARCHAR(20)`, NOT NULL, DEFAULT `'inbound'`): Dirección (`'inbound'` o `'outbound'`).
+* `status` (`VARCHAR(20)`, NOT NULL, DEFAULT `'in_progress'`): Ciclo de vida (`'in_progress'`, `'completed'`, `'dropped'`, `'error'`).
+* `started_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`): Marca de inicio de captura del stream.
+* `ended_at` (`TIMESTAMPTZ`, NULLABLE): Marca de cierre al colgar.
+* `duration_seconds` (`INTEGER`, NULLABLE): Duración total de la llamada en segundos.
+* `initial_sentiment` (`VARCHAR(15)`, NULLABLE): Sentimiento detectado en los primeros 60s (`'calm'`, `'frustrated'`, `'angry'`).
+* `final_sentiment` (`VARCHAR(15)`, NULLABLE): Sentimiento registrado al concluir el diálogo.
+
+
+* **Relaciones:**
+* 1:N con `TRANSCRIPT_TURN`.
+* 1:N con `AI_SUGGESTION`.
+* 1:1 con `CALL_SUMMARY`.
+
+
+
+---
+
+#### 5. Entidad: `TRANSCRIPT_TURN` (Turno de Diálogo)
+
+Almacena la secuencia cronológica de intervenciones devuelta por el motor STT en streaming.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único del turno.
+* `call_session_id` (`UUID`, FK, NOT NULL): Referencia a `CALL_SESSION(id)`.
+* `sequence_order` (`INTEGER`, NOT NULL): Número ordinal del turno en la conversación (1, 2, 3...).
+* `speaker_role` (`VARCHAR(10)`, NOT NULL): Rol del hablante (`'agent'` para micrófono, `'customer'` para audio de pestaña).
+* `content` (`TEXT`, NOT NULL): Transcripción final estabilizada del turno.
+* `start_offset_sec` (`DECIMAL(8,3)`, NOT NULL): Segundo en que comenzó a hablar respecto al inicio de la llamada.
+* `end_offset_sec` (`DECIMAL(8,3)`, NOT NULL): Segundo en que finalizó la frase.
+* `confidence_score` (`DECIMAL(4,3)`, NOT NULL): Nivel de confianza retornado por el STT (0.000 a 1.000).
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+* **Restricciones:** Clave compuesta única opcional `(call_session_id, sequence_order)`.
+
+---
+
+#### 6. Entidad: `AI_SUGGESTION` (Recomendación / Tarjeta de Copiloto)
+
+Registra cada tarjeta mostrada en la extensión del agente, evaluando latencia y efectividad.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único de la sugerencia.
+* `call_session_id` (`UUID`, FK, NOT NULL): Referencia a `CALL_SESSION(id)`.
+* `knowledge_chunk_id` (`UUID`, FK, NULLABLE): Referencia al fragmento RAG usado como base (si aplica).
+* `suggestion_type` (`VARCHAR(30)`, NOT NULL): Categoría (`'rag_answer'`, `'sentiment_alert'`, `'compliance_warning'`, `'crm_quick_action'`).
+* `suggested_text` (`TEXT`, NOT NULL): Mensaje o viñetas procesables desplegadas al agente.
+* `action_payload` (`JSONB`, NOT NULL, DEFAULT `'{}'`): Metadatos adicionales para la UI (enlaces directos, datos a copiar con un clic).
+* `triggered_at_sec` (`DECIMAL(8,3)`, NOT NULL): Segundo de la llamada en que se envió la recomendación.
+* `trigger_source` (`VARCHAR(20)`, NOT NULL, DEFAULT `'auto'`): Origen (`'auto'` si la detectó el LLM, `'manual'` si el agente presionó el botón de asistencia).
+* `agent_action` (`VARCHAR(20)`, NOT NULL, DEFAULT `'ignored'`): Interacción del operador (`'copied'`, `'liked'`, `'disliked'`, `'dismissed'`, `'ignored'`).
+* `latency_ms` (`INTEGER`, NOT NULL): Milisegundos transcurridos desde el fin del turno de voz hasta la entrega de la sugerencia en pantalla.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+
+---
+
+#### 7. Entidad: `CALL_SUMMARY` (Resumen Post-Llamada / ACW)
+
+Resultado del procesamiento tras colgar la llamada para actualizar el CRM.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único del resumen.
+* `call_session_id` (`UUID`, FK, NOT NULL, UNIQUE): Relación 1:1 estricta con `CALL_SESSION(id)`.
+* `main_reason` (`TEXT`, NOT NULL): Causa de contacto sintetizada en 1 o 2 oraciones.
+* `solution_provided` (`TEXT`, NOT NULL): Acciones tomadas o respuesta entregada por el operador.
+* `pending_tasks` (`TEXT`, NULLABLE): Compromisos adquiridos o tareas de seguimiento (*follow-ups*).
+* `disposition_code` (`VARCHAR(30)`, NOT NULL): Tipificación estandarizada para el CRM (ej. `'soporte_resuelto'`, `'reclamo_escalado'`, `'venta_perdida'`).
+* `crm_synced` (`BOOLEAN`, NOT NULL, DEFAULT `false`): Estado de sincronización hacia el CRM.
+* `synced_at` (`TIMESTAMPTZ`, NULLABLE): Marca temporal en que la API del CRM aceptó el resumen.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+
+---
+
+#### 8. Entidad: `KNOWLEDGE_DOCUMENT` (Documento de Base de Conocimiento)
+
+Metadatos del documento maestro (políticas, instructivos, guías de atención).
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único del documento.
+* `tenant_id` (`UUID`, FK, NOT NULL): Referencia a `TENANT(id)`.
+* `title` (`VARCHAR(200)`, NOT NULL): Título legible del procedimiento.
+* `category` (`VARCHAR(50)`, NOT NULL): Área (ej. `'Facturación'`, `'Planes'`, `'Soporte'`).
+* `source_url` (`VARCHAR(255)`, NULLABLE): Enlace al documento original en Notion, Confluence o SharePoint.
+* `version` (`INTEGER`, NOT NULL, DEFAULT `1`): Control de versiones.
+* `is_active` (`BOOLEAN`, NOT NULL, DEFAULT `true`): Disponibilidad para indexación semántica.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+* **Relaciones:** 1:N con `KNOWLEDGE_CHUNK`.
+
+---
+
+#### 9. Entidad: `KNOWLEDGE_CHUNK` (Fragmento de Conocimiento / RAG)
+
+Segmentos de texto extraídos del documento maestro e indexados vectorialmente.
+
+* **Atributos:**
+* `id` (`UUID`, PK): Identificador único del fragmento.
+* `knowledge_document_id` (`UUID`, FK, NOT NULL): Referencia a `KNOWLEDGE_DOCUMENT(id)`.
+* `chunk_index` (`INTEGER`, NOT NULL): Posición secuencial del fragmento dentro del documento.
+* `chunk_text` (`TEXT`, NOT NULL): Texto plano procesado para el contexto del LLM.
+* `vector_point_id` (`VARCHAR(100)`, NOT NULL, UNIQUE): Identificador del vector en la base de datos vectorial (Qdrant/Chroma).
+* `metadata` (`JSONB`, NOT NULL, DEFAULT `'{}'`): Etiquetas semánticas para filtros híbridos.
+* `created_at` (`TIMESTAMPTZ`, NOT NULL, DEFAULT `now()`).
+
+
+* **Relaciones:** 1:N opcional con `AI_SUGGESTION` (Trazabilidad estricta de qué fragmento originó cada sugerencia).
 ---
 
 ## 4. Especificación de la API
