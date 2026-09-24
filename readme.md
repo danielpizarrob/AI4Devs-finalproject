@@ -1022,13 +1022,240 @@ Como agente de call center, quiero que el sistema redacte un resumen estructurad
 
 ## 6. Tickets de Trabajo
 
-> Documenta 3 de los tickets de trabajo principales del desarrollo, uno de backend, uno de frontend, y uno de bases de datos. Da todo el detalle requerido para desarrollar la tarea de inicio a fin teniendo en cuenta las buenas prácticas al respecto. 
+# 6. Tickets de Trabajo
 
-**Ticket 1**
+---
 
-**Ticket 2**
+## Ticket 1: Backend & Orquestación
 
-**Ticket 3**
+### Metadatos
+
+* **ID:** `BACK-101`
+* **Título:** Ingesta de audio dual-channel vía WebSocket y relay en streaming a Deepgram Nova-2
+* **Tipo:** Tarea de Desarrollo / Backend
+* **Componente:** `apps/orchestrator`
+* **Prioridad:** Alta (Bloqueante para el pipeline de IA)
+
+---
+
+### Descripción del Requerimiento
+
+Implementar un endpoint WebSocket en el servidor Fastify (`/ws/audio-stream/:sessionId`) que reciba paquetes binarios de audio PCM (16-bit, 16 kHz, estéreo/dual-channel) provenientes de la extensión del navegador. El backend debe desempaquetar el flujo y enviarlo de forma continua a la API de streaming de Deepgram (modelo Nova-2 multicanal en español), capturar los eventos de transcripción estabilizada (`is_final: true`) y publicarlos en el bus de eventos interno desacoplado (`EventBus`) para la orquestación de RAG y CRM.
+
+---
+
+### Especificación Técnica de Implementación
+
+1. **Ruta y Autenticación:**
+* Crear el handler con `@fastify/websocket` en `src/gateway/audioStreamSocket.ts`.
+* Extraer el parámetro `sessionId` de la URL y validar el token JWT provisto en la query string (`?token=...`). Rechazar con código de cierre WebSocket `1008 (Policy Violation)` si es inválido o expiró.
+
+
+2. **Conexión de Salida a STT:**
+* Utilizar `@deepgram/sdk` configurado para streaming en tiempo real:
+* `model: "nova-2"`
+* `language: "es"`
+* `punctuate: true`
+* `interim_results: false` (solo finales para el MVP)
+* `multichannel: true` (Canal 0 = Cliente, Canal 1 = Agente)
+* `endpointing: 300` (detección de silencio en 300 ms)
+
+
+
+
+3. **Flujo de Datos:**
+* Cada fragmento binario (`Buffer`) recibido por el socket del cliente se reenvía sin alteraciones al socket de Deepgram (`deepgramLive.send(chunk)`).
+* Al recibir el evento `TranscriptReceived` de Deepgram:
+* Mapear `channel_index: 0` a `speaker: 'customer'` y `channel_index: 1` a `speaker: 'agent'`.
+* Extraer `transcript`, `start`, `duration` y `confidence`.
+* Emitir el evento de dominio `TRANSCRIPT_TURN_COMPLETED` hacia el orquestador en memoria.
+
+
+
+
+4. **Ciclo de Vida y Limpieza:**
+* Ante desconexión del cliente (`socket.on('close')`), llamar a `deepgramLive.finish()`, limpiar los listeners y cerrar la sesión en memoria para evitar fugas de sockets abiertos.
+
+
+
+---
+
+### Criterios de Aceptación (Definición de Terminado)
+
+* [ ] Conexión WebSocket funcional y protegida por JWT en `/ws/audio-stream/:sessionId`.
+* [ ] Latencia de transcripción final devuelta menor o igual a 450 ms desde que el cliente deja de hablar (medido con métricas de performance).
+* [ ] Discriminación unívoca de hablantes: el texto del Canal 0 siempre se etiqueta como `customer` y el Canal 1 como `agent`.
+* [ ] Cobertura de pruebas unitarias superior al 80% sobre los adaptadores de parseo de audio y mapeo de eventos.
+* [ ] No existen fugas de sockets huérfanos tras desconexión forzada del cliente (probado con 50 aperturas/cierres abruptos).
+
+---
+
+### Plan de Pruebas y Validación
+
+1. **Prueba Unitaria:**
+* Crear mock del SDK de Deepgram con Vitest.
+* Inyectar payloads de prueba y comprobar que el mapper asigne correctamente `speaker` según el canal.
+
+
+2. **Prueba de Integración Local:**
+* Ejecutar un script Node.js cliente (`test/mocks/sendAudioFile.ts`) que lea un archivo `.wav` estéreo de 16-bit/16 kHz y lo transmita en chunks de 20 ms cada 20 ms.
+* Validar en la consola del backend que se impriman los turnos transcritos con formato JSON válido.
+
+
+
+---
+
+## Ticket 2: Frontend & Extensión de Navegador
+
+### Metadatos
+
+* **ID:** `FRONT-201`
+* **Título:** Captura de audio Offscreen (Pestaña + Micro) y Panel Lateral React para sugerencias
+* **Tipo:** Tarea de Desarrollo / Frontend
+* **Componente:** `apps/extension`
+* **Prioridad:** Alta (Bloqueante para interacción de usuario)
+
+---
+
+### Descripción del Requerimiento
+
+Implementar el ciclo de captura de audio dual en la extensión de Chrome (Manifest V3) empleando un documento *Offscreen* para eludir las restricciones del Service Worker. El documento debe capturar la salida de audio de la pestaña activa de Wildix Collaboration (`chrome.tabCapture`) y el micrófono del agente (`navigator.mediaDevices.getUserMedia`), fusionarlos en un único `MediaStream` estéreo sin cancelar la audición del operador, y transmitirlos por WebSocket al backend. Asimismo, crear la UI del `Side Panel` en React 18 que renderice las tarjetas de recomendación en tiempo real.
+
+---
+
+### Especificación Técnica de Implementación
+
+1. **Documento Offscreen (`src/offscreen/audioCapture.ts`):**
+* Crear el documento offscreen desde el Background Service Worker si no existe: `chrome.offscreen.createDocument(...)` con razón `USER_MEDIA`.
+* Capturar pestaña: `chrome.tabCapture.getMediaStreamId()` y obtener stream mediante `getUserMedia({ audio: { mandatory: { chromeMediaSource: 'tab', chromeMediaSourceId } } })`.
+* Capturar micrófono: `navigator.mediaDevices.getUserMedia({ audio: true })`.
+* **Web Audio API:**
+* Instanciar `AudioContext` a 16000 Hz.
+* Conectar el stream de la pestaña a `audioContext.destination` para que el agente siga escuchando al cliente en sus auriculares.
+* Utilizar un `ChannelMergerNode(2)`: Conectar Pestaña al Canal 0 (izquierdo) y Micrófono al Canal 1 (derecho).
+* Crear un `ScriptProcessorNode` o `AudioWorkletNode` para convertir las muestras Float32 a Int16 PCM y enviarlas por WebSocket binario.
+
+
+
+
+2. **Interfaz Side Panel (`src/sidepanel/App.tsx`):**
+* Conectar por WebSocket secundario JSON para recibir eventos del backend (`SUGGESTION_ADDED`, `SENTIMENT_UPDATED`).
+* Componentes:
+* `CustomerProfileCard`: Muestra DNI/Teléfono, nombre y tickets previos.
+* `SuggestionList`: Tarjetas de 2-3 viñetas con botón "Copiar" que use `navigator.clipboard.writeText`.
+* `SentimentBadge`: Indicador discreto (Verde / Ámbar / Rojo).
+
+
+* Tecla de acceso rápido: Listener global para `keydown` en tecla `Espacio` o `F2` que emita un POST a `/api/v1/calls/:sessionId/assist`.
+
+
+
+---
+
+### Criterios de Aceptación (Definición de Terminado)
+
+* [ ] La captura de pestaña no interrumpe el retorno de audio en los auriculares del operador.
+* [ ] El WebSocket transmite chunks PCM Int16 a 16 kHz en formato estéreo continuo.
+* [ ] El panel lateral de Chrome se abre y renderiza las tarjetas dinámicas sin bloqueos visuales ni re-renderizados innecesarios (`React.memo` en tarjetas de sugerencia).
+* [ ] El botón "Copiar" traslada con éxito el texto sugerido al portapapeles y despliega un tooltip de confirmación temporal (2 segundos).
+* [ ] El atajo de teclado configurado dispara la petición manual de asistencia sin interferir en los inputs de texto normales.
+
+---
+
+### Plan de Pruebas y Validación
+
+1. **Prueba Funcional en Navegador:**
+* Cargar la extensión en `chrome://extensions/` en modo desarrollador.
+* Abrir Wildix Collaboration (o YouTube en pestaña de prueba) y reproducir audio mientras se habla por el micrófono.
+* Inspeccionar la pestaña offscreen en las herramientas de desarrollo y comprobar que el WebSocket envíe tráfico de subida constante (aprox. 64 KB/s para audio estéreo sin comprimir).
+
+
+2. **Prueba de Interfaz:**
+* Disparar eventos mock desde la consola para renderizar tarjetas de cliente y verificar que el botón "Copiar" funcione.
+
+
+
+---
+
+## Ticket 3: Base de Datos & Persistencia
+
+### Metadatos
+
+* **ID:** `DATA-301`
+* **Título:** Esquema relacional en PostgreSQL para llamadas, transcripciones y auditoría de IA
+* **Tipo:** Tarea de Desarrollo / Base de Datos
+* **Componente:** `apps/orchestrator/src/database`
+* **Prioridad:** Media-Alta (Base para persistencia de sesiones y analítica)
+
+---
+
+### Descripción del Requerimiento
+
+Diseñar e implementar las migraciones DDL en PostgreSQL para estructurar el modelo de datos relacional de la plataforma. El esquema debe soportar el almacenamiento normalizado de organizaciones (`TENANT`), agentes (`AGENT`), clientes identificados (`CUSTOMER`), sesiones de llamada (`CALL_SESSION`), turnos de transcripción cronológicos (`TRANSCRIPT_TURN`), sugerencias emitidas por el copiloto (`AI_SUGGESTION`), resúmenes post-llamada (`CALL_SUMMARY`) y base documental (`KNOWLEDGE_DOCUMENT`, `KNOWLEDGE_CHUNK`).
+
+---
+
+### Especificación Técnica de Implementación
+
+1. **Definición de Esquema (DDL):**
+* Crear migración SQL idempotente usando la herramienta de migraciones del proyecto (Prisma / Kysely / Drizzle).
+* Implementar todas las tablas con claves primarias `UUID` autogeneradas mediante `gen_random_uuid()`.
+* Configurar tipos estrictos:
+* `speaker_role`: `VARCHAR(10)` con CHECK (`speaker_role IN ('agent', 'customer')`).
+* `suggestion_type`: `VARCHAR(30)` con CHECK (`suggestion_type IN ('rag_answer', 'sentiment_alert', 'compliance_warning', 'crm_quick_action')`).
+* `agent_action`: `VARCHAR(20)` con CHECK (`agent_action IN ('copied', 'liked', 'disliked', 'dismissed', 'ignored')`).
+
+
+
+
+2. **Indexación Estratégica:**
+* `CREATE UNIQUE INDEX idx_agent_email ON AGENT(email);`
+* `CREATE UNIQUE INDEX idx_call_wildix_id ON CALL_SESSION(wildix_call_id);`
+* `CREATE INDEX idx_transcript_call_seq ON TRANSCRIPT_TURN(call_session_id, sequence_order);` (optimiza la recuperación del diálogo en orden cronológico).
+* `CREATE INDEX idx_customer_phone ON CUSTOMER(phone_number);` (optimiza el lookup por número llamante).
+* `CREATE INDEX idx_suggestion_call ON AI_SUGGESTION(call_session_id);`
+
+
+3. **Integridad Referencial:**
+* Configurar `ON DELETE CASCADE` para `TRANSCRIPT_TURN`, `AI_SUGGESTION` y `CALL_SUMMARY` asociados a una llamada borrada en entornos de prueba.
+* `RESTRICT` en eliminación de `TENANT` o `AGENT` si tienen llamadas históricas vinculadas.
+
+
+4. **Seed de Datos (`prisma/seed.ts` o equivalente):**
+* 1 Tenant de prueba (`CCL_DEMO`).
+* 2 Agentes con extensiones configuradas (`4010`, `4011`).
+* 5 Documentos de base de conocimiento troceados en chunks con IDs de referencia vectorial ficticios.
+
+
+
+---
+
+### Criterios de Aceptación (Definición de Terminado)
+
+* [ ] Migraciones ejecutables en sentido ascendente (`up`) y descendente (`down`) sin errores de sintaxis en PostgreSQL 16+.
+* [ ] Integridad de tipos y restricciones CHECK operativas ante inserción de valores inválidos (ej. speaker inválido falla inmediatamente).
+* [ ] El plan de ejecución (`EXPLAIN ANALYZE`) para la consulta de todos los turnos de transcripción de una sesión ejecuta un Index Scan sobre `idx_transcript_call_seq` en menos de 5 ms con 10,000 registros insertados.
+* [ ] Script de seed ejecuta de manera limpia e inserta los datos mínimos necesarios para desarrollo local.
+
+---
+
+### Plan de Pruebas y Validación
+
+1. **Prueba de Migración:**
+* Ejecutar en contenedor Docker local:
+```bash
+docker compose exec postgres psql -U callsense -d callsense_db -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+pnpm db:migrate
+pnpm db:seed
+
+```
+
+
+
+
+2. **Prueba de Restricciones (Integridad):**
+* Intentar insertar un turno de diálogo con `speaker_role = 'bot'` y confirmar que la base de datos lance error de violación de restricción CHECK.
+* Intentar duplicar un `wildix_call_id` y comprobar que se bloquee por índice único.
 
 ---
 
