@@ -300,7 +300,7 @@ Aquí tienes una versión refinada, exhaustiva y con máxima precisión técnica
 # 3. Modelo de Datos
 
 ### 3.1. Diagrama del modelo de datos
-
+```
 erDiagram
     TENANT ||--o{ AGENT : "emplea"
     TENANT ||--o{ KNOWLEDGE_DOCUMENT : "posee"
@@ -419,7 +419,7 @@ erDiagram
         jsonb metadata "NOT NULL, DEFAULT '{}'"
         datetime created_at "NOT NULL, DEFAULT now()"
     }
----
+```
 
 ### 3.2. Descripción de entidades principales
 
