@@ -603,7 +603,284 @@ Segmentos de texto extraídos del documento maestro e indexados vectorialmente.
 
 ## 4. Especificación de la API
 
-> Si tu backend se comunica a través de API, describe los endpoints principales (máximo 3) en formato OpenAPI. Opcionalmente puedes añadir un ejemplo de petición y de respuesta para mayor claridad
+Aquí tienes la especificación formal de los 3 endpoints principales del backend en formato **OpenAPI 3.0.3 (YAML)**, incluyendo esquemas estrictos, ejemplos de solicitud (*request*) y ejemplos de respuesta (*response*) para cada uno.
+
+---
+
+# 4. Especificación de la API
+
+```yaml
+openapi: 3.0.3
+info:
+  title: CallSense AI - Copilot Orchestrator API
+  version: 1.0.0
+  description: >
+    API REST para la autenticación de operadores, invocación asistida de 
+    conocimiento contextual (RAG) y consolidación post-llamada (ACW) hacia el CRM.
+servers:
+  - url: https://api.callsense.local/v1
+    description: Servidor de desarrollo / pruebas
+
+paths:
+  /auth/login:
+    post:
+      summary: Autenticar agente de call center
+      operationId: loginAgent
+      description: Valida las credenciales del operador corporativo y emite un token JWT con vigencia de turno para autenticar tanto peticiones HTTP como el canal de streaming WebSocket.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+                - password
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: daniel.pizarro@empresa.com
+                password:
+                  type: string
+                  format: password
+                  example: PasswordSeguro123!
+      responses:
+        '200':
+          description: Autenticación satisfactoria
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - token
+                  - token_type
+                  - expires_in
+                  - agent
+                properties:
+                  token:
+                    type: string
+                    example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMmU0...
+                  token_type:
+                    type: string
+                    example: Bearer
+                  expires_in:
+                    type: integer
+                    description: Segundos de vigencia
+                    example: 28800
+                  agent:
+                    type: object
+                    required:
+                      - id
+                      - full_name
+                      - pbx_extension
+                      - tenant_code
+                    properties:
+                      id:
+                        type: string
+                        format: uuid
+                        example: 3fa85f64-5717-4562-b3fc-2c963f66afa6
+                      full_name:
+                        type: string
+                        example: Daniel Pizarro
+                      pbx_extension:
+                        type: string
+                        example: "4010"
+                      tenant_code:
+                        type: string
+                        example: ccl_contact_center
+        '401':
+          description: Credenciales inválidas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /calls/{sessionId}/assist:
+    post:
+      summary: Forzar consulta asistida a la base de conocimiento (RAG Trigger)
+      operationId: triggerAssistance
+      description: Permite al operador disparar manualmente una consulta a la base de conocimiento usando el contexto acumulado de la llamada activa o un texto específico provisto mediante atajo de teclado.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          description: UUID de la sesión de llamada activa
+          schema:
+            type: string
+            format: uuid
+            example: 7b84f3df-b46f-4424-a74e-7b7da7a19280
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                custom_query:
+                  type: string
+                  description: Pregunta específica del operador o refinamiento del último turno
+                  example: ¿Cuál es el procedimiento para exonerar penalidad por corte fortuito?
+      responses:
+        '200':
+          description: Recomendación generada exitosamente
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - suggestion_id
+                  - call_session_id
+                  - suggestion_type
+                  - suggested_text
+                  - bullet_points
+                  - sources
+                  - latency_ms
+                properties:
+                  suggestion_id:
+                    type: string
+                    format: uuid
+                    example: 9c8b7a6d-5e4f-3a2b-1c0d-ef9a8b7c6d5e
+                  call_session_id:
+                    type: string
+                    format: uuid
+                    example: 7b84f3df-b46f-4424-a74e-7b7da7a19280
+                  suggestion_type:
+                    type: string
+                    example: rag_answer
+                  suggested_text:
+                    type: string
+                    example: Si el corte fue imprevisto y duró más de 4 horas, aplica compensación total sin penalidad contractual.
+                  bullet_points:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - Solicitar el número de ticket de incidencia técnica previa.
+                      - Validar que el corte supere las 4 horas continuas según sistema de red.
+                      - Aplicar tipificación 'Exoneración_Incidencia_Masiva' en CRM.
+                  sources:
+                    type: array
+                    items:
+                      type: string
+                    example:
+                      - Politica_Compensaciones_SLA_2026.pdf (Cap. 3, Art. 12)
+                  latency_ms:
+                    type: integer
+                    example: 640
+        '404':
+          description: Sesión de llamada no encontrada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /calls/{sessionId}/summary:
+    post:
+      summary: Generar y sincronizar resumen post-llamada (After Call Work)
+      operationId: completeCallSummary
+      description: Cierra formalmente la sesión de llamada, consolida la transcripción con el LLM, categoriza el contacto y sincroniza el ticket en el CRM empresarial.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          description: UUID de la sesión de llamada a cerrar
+          schema:
+            type: string
+            format: uuid
+            example: 7b84f3df-b46f-4424-a74e-7b7da7a19280
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disposition_override:
+                  type: string
+                  description: Código de tipificación ajustado manualmente por el operador
+                  example: soporte_tecnico_resuelto
+                agent_notes:
+                  type: string
+                  description: Observaciones adicionales del operador
+                  example: El cliente quedó conforme con la nota de crédito aplicada.
+      responses:
+        '200':
+          description: Resumen generado y persistido en CRM
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - summary_id
+                  - call_session_id
+                  - main_reason
+                  - solution_provided
+                  - pending_tasks
+                  - disposition_code
+                  - overall_sentiment
+                  - crm_synced
+                  - synced_at
+                properties:
+                  summary_id:
+                    type: string
+                    format: uuid
+                    example: 1e2d3c4b-5a6f-7e8d-9c0b-1a2b3c4d5e6f
+                  call_session_id:
+                    type: string
+                    format: uuid
+                    example: 7b84f3df-b46f-4424-a74e-7b7da7a19280
+                  main_reason:
+                    type: string
+                    example: Reclamo por cobro de penalidad no reconocida tras corte de servicio.
+                  solution_provided:
+                    type: string
+                    example: Se verificó la interrupción en el sistema central y se exoneró la penalidad de USD 25.
+                  pending_tasks:
+                    type: string
+                    nullable: true
+                    example: Enviar comprobante de ajuste por correo electrónico dentro de las 24 horas.
+                  disposition_code:
+                    type: string
+                    example: reclamo_facturacion_exonerado
+                  overall_sentiment:
+                    type: string
+                    enum: [positive, neutral, negative]
+                    example: positive
+                  crm_synced:
+                    type: boolean
+                    example: true
+                  synced_at:
+                    type: string
+                    format: date-time
+                    example: 2026-09-23T20:15:30Z
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: La sesión de llamada solicitada no existe o ya ha sido finalizada.
+
+```
 
 ---
 
